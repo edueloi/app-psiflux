@@ -42,20 +42,41 @@ const maskRG = v =>
    .replace(/(\d{2})\.(\d{3})(\d)/,'$1.$2.$3')
    .replace(/(\d{2})\.(\d{3})\.(\d{3})(\d)$/,'$1.$2.$3-$4');
 
-const maskPhone = v => {
-  const d = v.replace(/\D/g,'').slice(0,11);
-  if (d.length<=10) return d.replace(/^(\d{2})(\d{4})(\d{0,4})$/,(_,a,b,c)=>`(${a}) ${b}${c?'-'+c:''}`);
-  return d.replace(/^(\d{2})(\d{5})(\d{0,4})$/,(_,a,b,c)=>`(${a}) ${b}${c?'-'+c:''}`);
+const maskDate = v => {
+  const d = v.replace(/\D/g,'').slice(0,8);
+  if (d.length <= 2) return d;
+  if (d.length <= 4) return d.replace(/^(\d{2})(\d{0,2})/, '$1/$2');
+  return d.replace(/^(\d{2})(\d{2})(\d{0,4})/, '$1/$2/$3');
 };
 
-const maskCEP = v =>
-  v.replace(/\D/g,'').slice(0,8)
-   .replace(/^(\d{5})(\d{0,3})$/,(_,a,b)=>b?`${a}-${b}`:a);
+const maskPhone = (v, country = '55') => {
+  const d = v.replace(/\D/g,'');
+  const c = String(country).toUpperCase();
+  
+  if (c === '55' || c === 'BR') {
+    const s = d.slice(0, 11);
+    if (s.length <= 2) return s;
+    if (s.length <= 6) return s.replace(/^(\d{2})(\d{0,4})/, '($1) $2');
+    if (s.length <= 10) return s.replace(/^(\d{2})(\d{4})(\d{0,4})/, '($1) $2-$3');
+    return s.replace(/^(\d{2})(\d{5})(\d{0,4})/, '($1) $2-$3');
+  }
+  
+  if (c === '1' || c === 'US') {
+    const s = d.slice(0, 10);
+    if (s.length <= 3) return s;
+    if (s.length <= 6) return s.replace(/^(\d{3})(\d{0,3})/, '($1) $2');
+    return s.replace(/^(\d{3})(\d{3})(\d{0,4})/, '($1) $2-$3');
+  }
 
-const maskDate = v =>
-  v.replace(/\D/g,'').slice(0,8)
-   .replace(/^(\d{2})(\d)/,'$1/$2')
-   .replace(/^(\d{2})\/(\d{2})(\d)/,'$1/$2/$3');
+  if (c === '351' || c === 'PT') {
+    const s = d.slice(0, 9);
+    if (s.length <= 3) return s;
+    if (s.length <= 6) return s.replace(/^(\d{3})(\d{3})(\d{0,3})/, '$1 $2 $3');
+    return s.replace(/^(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+  }
+
+  return d.slice(0, 15);
+};
 
 /* ─── ViaCEP ──────────────────────────────────────────── */
 const fetchCEP = async (cep) => {
@@ -70,14 +91,14 @@ const fetchCEP = async (cep) => {
 
 /* ─── Form ────────────────────────────────────────────── */
 const EMPTY = {
-  name:'', email:'', phone:'', phone_country:'BR', phone2:'', phone2_country:'BR',
+  name:'', email:'', phone:'', phone_country:'55', phone2:'', phone2_country:'55',
   cpf:'', rg:'', birth_date:'', gender:'', marital_status:'',
-  education:'', profession:'', nationality:'', naturality:'',
+  education:'', profession:'', nationality:'Brasileira', naturality:'',
   has_children: false, children_count:'0', minor_children_count:'0', spouse_name:'',
   family_contact:'', emergency_contact:'',
   responsible_name:'', responsible_phone:'',
-  health_plan:'', diagnosis:'',
-  zip_code:'', address:'', city:'', state:'',
+  health_plan:'', clinical_type: 'particular', diagnosis:'',
+  zip_code:'', address:'', neighborhood: '', address_number: '', city:'', state:'',
   notes:'', status:'active',
   is_payer: true, payer_name:'', payer_cpf:'', payer_phone:'',
 };
@@ -88,12 +109,12 @@ const toForm = (p) => {
     : '';
   return {
     name: getName(p), email: p.email||'',
-    phone: p.phone||'', phone_country: p.phone_country||'BR',
-    phone2: p.phone2||'', phone2_country: p.phone2_country||'BR',
+    phone: p.phone||'', phone_country: p.phone_country||'55',
+    phone2: p.phone2||'', phone2_country: p.phone2_country||'55',
     cpf: p.cpf||'', rg: p.rg||'',
     birth_date: bdate, gender: p.gender||'',
     marital_status: p.marital_status||'', education: p.education||'',
-    profession: p.profession||'', nationality: p.nationality||'',
+    profession: p.profession||'', nationality: p.nationality||'Brasileira',
     naturality: p.naturality||'',
     has_children: !!p.has_children,
     children_count: String(p.children_count||0),
@@ -103,8 +124,12 @@ const toForm = (p) => {
     emergency_contact: p.emergency_contact||'',
     responsible_name: p.responsible_name||'',
     responsible_phone: p.responsible_phone||'',
-    health_plan: p.health_plan||'', diagnosis: p.diagnosis||'',
+    health_plan: p.health_plan||'',
+    clinical_type: p.clinical_type || (p.health_plan ? 'convenio' : 'particular'),
+    diagnosis: p.diagnosis||'',
     zip_code: p.zip_code||'', address: p.address||'',
+    neighborhood: p.neighborhood || '',
+    address_number: p.address_number || '',
     city: p.city||'', state: p.state||'',
     notes: p.notes||'', status: p.status||'active',
     is_payer: p.is_payer!==false,
@@ -117,6 +142,43 @@ const STATUS_FILTERS = [
   { key:'active',   label:'Ativos',    color:'#10b981' },
   { key:'waiting',  label:'Em espera', color:'#f59e0b' },
   { key:'inactive', label:'Inativos',  color:'#94a3b8' },
+];
+
+const GENDER_OPTIONS = [
+  { label: 'Feminino', value: 'F' },
+  { label: 'Masculino', value: 'M' },
+  { label: 'Outro', value: 'O' },
+  { label: 'Não-Binário', value: 'NB' },
+];
+
+const MARITAL_OPTIONS = [
+  { label: 'Solteiro(a)', value: 'solteiro' },
+  { label: 'Casado(a)', value: 'casado' },
+  { label: 'Divorciado(a)', value: 'divorciado' },
+  { label: 'Viúvo(a)', value: 'viuvo' },
+  { label: 'União Estável', value: 'uniao_estavel' },
+  { label: 'Separado(a)', value: 'separado' },
+];
+
+const EDUCATION_OPTIONS = [
+  { label: 'Alfabetizado', value: 'Alfabetizado' },
+  { label: 'Fundamental Incompleto', value: 'Fundamental Incompleto' },
+  { label: 'Fundamental Completo', value: 'Fundamental Completo' },
+  { label: 'Médio Incompleto', value: 'Médio Incompleto' },
+  { label: 'Médio Completo', value: 'Médio Completo' },
+  { label: 'Superior Incompleto', value: 'Superior Incompleto' },
+  { label: 'Superior Completo', value: 'Superior Completo' },
+  { label: 'Pós-graduação', value: 'Pós-graduação' },
+  { label: 'Mestrado', value: 'Mestrado' },
+  { label: 'Doutorado', value: 'Doutorado' },
+];
+
+const DDI_OPTIONS = [
+  { label: '🇧🇷 +55', value: '55' },
+  { label: '🇺🇸 +1',  value: '1' },
+  { label: '🇵🇹 +351', value: '351' },
+  { label: '🇦🇷 +54',  value: '54' },
+  { label: '🇺🇾 +598', value: '598' },
 ];
 
 /* ═══════════════════════════════════════════════════════ */
@@ -174,7 +236,8 @@ export default function PatientsScreen() {
       setCepLoading(true);
       const d = await fetchCEP(m);
       if (d) setForm(f=>({...f,
-        address: [d.logradouro,d.bairro].filter(Boolean).join(', ')||f.address,
+        address: d.logradouro || f.address,
+        neighborhood: d.bairro || f.neighborhood,
         city: d.localidade||f.city, state: d.uf||f.state,
       }));
       setCepLoading(false);
@@ -422,14 +485,16 @@ export default function PatientsScreen() {
               {(selected.zip_code||selected.address||selected.city) && (
                 <InfoSection title="📍 Endereço" items={[
                   {label:'CEP',     value:selected.zip_code},
-                  {label:'Endereço',value:selected.address},
+                  {label:'Endereço',value:selected.address + (selected.address_number ? `, ${selected.address_number}` : '')},
+                  {label:'Bairro',  value:selected.neighborhood},
                   {label:'Cidade',  value:[selected.city,selected.state].filter(Boolean).join(' — ')},
                 ]}/>
               )}
 
-              {(selected.health_plan||selected.diagnosis) && (
+              {(selected.clinical_type||selected.health_plan||selected.diagnosis) && (
                 <InfoSection title="🏥 Dados clínicos" items={[
-                  {label:'Plano de saúde',  value:selected.health_plan},
+                  {label:'Tipo',            value:selected.clinical_type === 'convenio' ? 'Convênio' : 'Particular'},
+                  {label:'Plano de saúde',  value:selected.clinical_type === 'convenio' ? selected.health_plan : null},
                   {label:'Diagnóstico/CID', value:selected.diagnosis},
                 ]}/>
               )}
@@ -512,43 +577,87 @@ export default function PatientsScreen() {
 
             <Row>
               <F half label="CPF" value={form.cpf} onChange={v=>setForm(f=>({...f,cpf:maskCPF(v)}))} keyboard="numeric" placeholder="000.000.000-00"/>
-              <F half label="RG"  value={form.rg}  onChange={v=>setForm(f=>({...f,rg:maskRG(v)}))}  keyboard="numeric" placeholder="00.000.000-0"/>
+              <F half label="Nascimento" value={form.birth_date} onChange={v=>setForm(f=>({...f,birth_date:maskDate(v)}))} keyboard="numeric" placeholder="DD/MM/AAAA"/>
             </Row>
 
             <Row>
-              <F half label="Nascimento" value={form.birth_date} onChange={v=>setForm(f=>({...f,birth_date:maskDate(v)}))} keyboard="numeric" placeholder="DD/MM/AAAA"/>
               <View style={{flex:1}}>
                 <Text style={s.fieldLabel}>Gênero</Text>
-                <View style={{flexDirection:'row',gap:5,flexWrap:'wrap'}}>
-                  {[['M','Masc.'],['F','Fem.'],['O','Outro'],['NB','N-Bin.']].map(([v,l])=>(
-                    <TouchableOpacity key={v} style={[s.chip,form.gender===v&&s.chipOn]} onPress={()=>setForm(f=>({...f,gender:v}))}>
-                      <Text style={[s.chipTxt,form.gender===v&&s.chipTxtOn]}>{l}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
+                <Select
+                  value={form.gender}
+                  options={GENDER_OPTIONS}
+                  onSelect={v=>setForm(f=>({...f,gender:v}))}
+                  placeholder="Selecione"
+                />
+              </View>
+              <View style={{flex:1}}>
+                <Text style={s.fieldLabel}>Estado civil</Text>
+                <Select
+                  value={form.marital_status}
+                  options={MARITAL_OPTIONS}
+                  onSelect={v=>setForm(f=>({...f,marital_status:v}))}
+                  placeholder="Selecione"
+                />
               </View>
             </Row>
 
+            <F label="Profissão"    value={form.profession}  onChange={v=>setForm(f=>({...f,profession:v}))}  autoCapitalize="words"/>
+            
             <View style={{marginBottom:14}}>
-              <Text style={s.fieldLabel}>Estado civil</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{gap:6}}>
-                {[['solteiro','Solteiro'],['casado','Casado'],['divorciado','Divorciado'],['viuvo','Viúvo'],['uniao_estavel','União estável'],['separado','Separado']].map(([v,l])=>(
-                  <TouchableOpacity key={v} style={[s.chip,form.marital_status===v&&s.chipOn]} onPress={()=>setForm(f=>({...f,marital_status:v}))}>
-                    <Text style={[s.chipTxt,form.marital_status===v&&s.chipTxtOn]}>{l}</Text>
-                  </TouchableOpacity>
-                ))}
-              </ScrollView>
+              <Text style={s.fieldLabel}>Escolaridade</Text>
+              <Select
+                value={form.education}
+                options={EDUCATION_OPTIONS}
+                onSelect={v=>setForm(f=>({...f,education:v}))}
+                placeholder="Selecione a escolaridade"
+              />
             </View>
 
-            <F label="Profissão"    value={form.profession}  onChange={v=>setForm(f=>({...f,profession:v}))}  autoCapitalize="words"/>
-            <F label="Escolaridade" value={form.education}   onChange={v=>setForm(f=>({...f,education:v}))}   autoCapitalize="words"/>
             <F label="Nacionalidade"value={form.nationality} onChange={v=>setForm(f=>({...f,nationality:v}))} autoCapitalize="words"/>
             <F label="Naturalidade" value={form.naturality}  onChange={v=>setForm(f=>({...f,naturality:v}))}  autoCapitalize="words"/>
 
             {/* ── CONTATO ── */}
             <SectionHeader title="📞 Contato"/>
-            <F label="Telefone / WhatsApp" value={form.phone}  onChange={v=>setForm(f=>({...f,phone:maskPhone(v)}))}  keyboard="phone-pad" placeholder="(11) 99999-9999"/>
-            <F label="Telefone 2 (opcional)" value={form.phone2} onChange={v=>setForm(f=>({...f,phone2:maskPhone(v)}))} keyboard="phone-pad" placeholder="(11) 99999-9999"/>
+            <View style={{marginBottom:14}}>
+              <Text style={s.fieldLabel}>Telefone / WhatsApp</Text>
+              <Row>
+                <View style={{width: 100}}>
+                  <Select
+                    value={form.phone_country}
+                    options={DDI_OPTIONS}
+                    onSelect={v=>setForm(f=>({...f,phone_country:v}))}
+                  />
+                </View>
+                <TextInput 
+                  style={[s.fieldInput, {flex: 1}]} 
+                  value={form.phone} 
+                  onChangeText={v=>setForm(f=>({...f,phone:maskPhone(v, form.phone_country)}))} 
+                  keyboardType="phone-pad" 
+                  placeholder="(11) 99999-9999"
+                />
+              </Row>
+            </View>
+
+            <View style={{marginBottom:14}}>
+              <Text style={s.fieldLabel}>Telefone 2 (opcional)</Text>
+              <Row>
+                <View style={{width: 100}}>
+                  <Select
+                    value={form.phone2_country}
+                    options={DDI_OPTIONS}
+                    onSelect={v=>setForm(f=>({...f,phone2_country:v}))}
+                  />
+                </View>
+                <TextInput 
+                  style={[s.fieldInput, {flex: 1}]} 
+                  value={form.phone2} 
+                  onChangeText={v=>setForm(f=>({...f,phone2:maskPhone(v, form.phone2_country)}))} 
+                  keyboardType="phone-pad" 
+                  placeholder="(11) 99999-9999"
+                />
+              </Row>
+            </View>
+
             <F label="E-mail" value={form.email} onChange={v=>setForm(f=>({...f,email:v}))} keyboard="email-address" autoCapitalize="none"/>
 
             {/* ── ENDEREÇO ── */}
@@ -561,7 +670,11 @@ export default function PatientsScreen() {
                 {cepLoading&&<ActivityIndicator color="#6366f1"/>}
               </View>
             </View>
-            <F label="Endereço completo" value={form.address} onChange={v=>setForm(f=>({...f,address:v}))} autoCapitalize="words" placeholder="Rua, número, bairro..."/>
+            <F label="Logradouro" value={form.address} onChange={v=>setForm(f=>({...f,address:v}))} autoCapitalize="words" placeholder="Rua, Avenida..."/>
+            <Row>
+              <F style={{flex: 1.5}} label="Bairro" value={form.neighborhood} onChange={v=>setForm(f=>({...f,neighborhood:v}))} autoCapitalize="words"/>
+              <F style={{flex: 1}} label="Número" value={form.address_number} onChange={v=>setForm(f=>({...f,address_number:v}))} keyboard="numeric"/>
+            </Row>
             <Row>
               <F half label="Cidade" value={form.city}  onChange={v=>setForm(f=>({...f,city:v}))} autoCapitalize="words"/>
               <F style={{flex:0.3}} label="UF" value={form.state} onChange={v=>setForm(f=>({...f,state:v.toUpperCase()}))} autoCapitalize="characters" maxLength={2}/>
@@ -569,7 +682,20 @@ export default function PatientsScreen() {
 
             {/* ── DADOS CLÍNICOS ── */}
             <SectionHeader title="🏥 Dados clínicos"/>
-            <F label="Plano de saúde / Convênio" value={form.health_plan} onChange={v=>setForm(f=>({...f,health_plan:v}))} autoCapitalize="words"/>
+            <View style={{marginBottom:14}}>
+              <Text style={s.fieldLabel}>Tipo de Atendimento</Text>
+              <View style={{flexDirection:'row',gap:10}}>
+                {[['particular','Particular'],['convenio','Convênio']].map(([v,l])=>(
+                  <TouchableOpacity key={v} style={[s.chip,{flex:1},form.clinical_type===v&&s.chipOn]} onPress={()=>setForm(f=>({...f,clinical_type:v}))}>
+                    <Text style={[s.chipTxt,form.clinical_type===v&&s.chipTxtOn]}>{l}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {form.clinical_type === 'convenio' && (
+              <F label="Plano de saúde / Convênio" value={form.health_plan} onChange={v=>setForm(f=>({...f,health_plan:v}))} autoCapitalize="words" placeholder="Nome do convênio ou plano"/>
+            )}
             <View style={{marginBottom:14}}>
               <Text style={s.fieldLabel}>Diagnóstico / CID</Text>
               <TextInput style={[s.fieldInput,{height:70,textAlignVertical:'top'}]} value={form.diagnosis}
@@ -643,6 +769,48 @@ export default function PatientsScreen() {
 }
 
 /* ─── Sub-componentes ─────────────────────────────────── */
+function Select({ value, options, onSelect, placeholder = 'Selecione...' }) {
+  const [open, setOpen] = useState(false);
+  const normalizedValue = useMemo(() => {
+    const v = String(value || '').toUpperCase();
+    if (v === 'BR') return '55';
+    if (v === 'US') return '1';
+    if (v === 'PT') return '351';
+    if (v === 'AR') return '54';
+    if (v === 'UY') return '598';
+    return v;
+  }, [value]);
+
+  const selected = options.find(o => String(o.value) === normalizedValue);
+  return (
+    <>
+      <TouchableOpacity style={[s.fieldInput, { paddingRight: 20, minWidth: 70, justifyContent: 'center' }]} onPress={() => setOpen(true)}>
+        <Text style={{ color: selected ? '#0f172a' : '#94a3b8', fontSize: 13, fontWeight: '700' }} numberOfLines={1}>
+          {selected ? selected.label : placeholder}
+        </Text>
+        <Text style={{ position: 'absolute', right: 5, top: 13, color: '#94a3b8', fontSize: 10 }}>▼</Text>
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="fade">
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setOpen(false)}>
+          <View style={s.selectSheet}>
+            <View style={s.selectHandle}/>
+            <ScrollView>
+              {options.map(o => (
+                <TouchableOpacity key={o.value} style={s.selectOption} onPress={() => { onSelect(o.value); setOpen(false); }}>
+                  <Text style={[s.selectOptionTxt, value === o.value && { color: '#6366f1', fontWeight: '800' }]}>
+                    {o.label}
+                  </Text>
+                  {value === o.value && <Text style={{ color: '#6366f1', fontWeight: '800' }}>✓</Text>}
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+    </>
+  );
+}
+
 function SectionHeader({title}) {
   return (
     <View style={s.sectionHeaderWrap}>
@@ -805,4 +973,10 @@ const s = StyleSheet.create({
 
   deleteBtn:    {backgroundColor:'#fef2f2', borderRadius:12, padding:14, alignItems:'center', marginTop:14, borderWidth:1, borderColor:'#fecaca'},
   deleteBtnTxt: {color:'#ef4444', fontWeight:'800', fontSize:14},
+
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  selectSheet:  { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, maxHeight: '60%' },
+  selectHandle: { width: 40, height: 4, backgroundColor: '#e2e8f0', borderRadius: 2, alignSelf: 'center', marginBottom: 15 },
+  selectOption: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#f1f5f9', flexDirection: 'row', justifyContent: 'space-between' },
+  selectOptionTxt: { fontSize: 16, color: '#334155' },
 });

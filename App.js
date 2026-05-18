@@ -139,24 +139,27 @@ function FerramentasHomeScreen({ navigation }) {
         {TOOLS.map(item => (
           <TouchableOpacity
             key={item.screen}
-            style={[ft.toolCard,{backgroundColor:item.bg, borderLeftColor:item.color}]}
+            style={ft.toolCard}
             onPress={()=>navigation.navigate(item.screen)}
             activeOpacity={0.78}>
-            <View style={[ft.toolIcon,{backgroundColor:item.color+'22'}]}>
-              <Text style={{fontSize:26}}>{item.emoji}</Text>
+            <View style={[ft.toolIcon,{backgroundColor:item.color+'15'}]}>
+              <Text style={{fontSize:24}}>{item.emoji}</Text>
             </View>
             <View style={ft.toolInfo}>
-              <Text style={[ft.toolLabel,{color:item.color}]}>{item.label}</Text>
+              <Text style={ft.toolLabel}>{item.label}</Text>
               <Text style={ft.toolDesc} numberOfLines={1}>{item.desc}</Text>
             </View>
-            <Text style={[ft.toolArrow,{color:item.color}]}>›</Text>
+            <View style={[ft.toolArrowBox, {backgroundColor: item.color + '10'}]}>
+              <Text style={[ft.toolArrow,{color:item.color}]}>❯</Text>
+            </View>
           </TouchableOpacity>
         ))}
       </View>
 
       {/* ── Logout ── */}
       <TouchableOpacity style={ft.logoutBtn} onPress={logout} activeOpacity={0.85}>
-        <Text style={ft.logoutTxt}>🚪  Encerrar sessão</Text>
+        <Text style={ft.logoutEmoji}>🚪</Text>
+        <Text style={ft.logoutTxt}>Encerrar Sessão com Segurança</Text>
       </TouchableOpacity>
 
       <View style={{height:40}}/>
@@ -195,24 +198,28 @@ const ft = StyleSheet.create({
   sectionSub:  { fontSize:12, color:'#64748b', marginTop:2 },
 
   /* grid */
-  grid:        { paddingHorizontal:16, gap:10 },
+  grid:        { paddingHorizontal: 16, gap: 12 },
   toolCard:    { flexDirection:'row', alignItems:'center', backgroundColor:'#fff',
-                  borderRadius:16, padding:14, gap:14, borderLeftWidth:4,
-                  shadowColor:'#000', shadowOffset:{width:0,height:2},
-                  shadowOpacity:0.05, shadowRadius:8, elevation:3 },
-  toolIcon:    { width:52, height:52, borderRadius:16, alignItems:'center', justifyContent:'center' },
+                  borderRadius: 24, padding: 12, gap: 14,
+                  borderWidth: 1, borderColor: '#f1f5f9',
+                  shadowColor:'#000', shadowOffset:{width:0,height:4},
+                  shadowOpacity:0.04, shadowRadius:12, elevation:3 },
+  toolIcon:    { width:56, height:56, borderRadius:18, alignItems:'center', justifyContent:'center' },
   toolInfo:    { flex:1 },
-  toolLabel:   { fontSize:15, fontWeight:'900' },
-  toolDesc:    { fontSize:12, color:'#64748b', marginTop:2 },
-  toolArrow:   { fontSize:26, fontWeight:'300', marginRight:2 },
+  toolLabel:   { fontSize:15, fontWeight:'900', color: BRAND },
+  toolDesc:    { fontSize:12, color:'#94a3b8', marginTop: 3, fontWeight: '500' },
+  toolArrowBox:{ width:32, height:32, borderRadius:12, alignItems: 'center', justifyContent: 'center' },
+  toolArrow:   { fontSize:12, fontWeight:'900' },
 
   /* logout */
-  logoutBtn:   { margin:16, marginTop:16, backgroundColor:'#fef2f2',
-                  borderRadius:16, padding:16, alignItems:'center',
-                  borderWidth:1, borderColor:'#fecaca',
-                  shadowColor:'#ef4444', shadowOffset:{width:0,height:2},
-                  shadowOpacity:0.08, shadowRadius:6, elevation:2 },
-  logoutTxt:   { color:'#ef4444', fontWeight:'800', fontSize:15 },
+  logoutBtn:   { margin: 16, marginTop: 24, backgroundColor: '#fff',
+                  borderRadius: 20, padding: 18, alignItems:'center',
+                  flexDirection: 'row', justifyContent: 'center', gap: 12,
+                  borderWidth: 1.5, borderColor: '#fee2e2',
+                  shadowColor:'#ef4444', shadowOffset:{width:0,height:4},
+                  shadowOpacity:0.05, shadowRadius:8, elevation:2 },
+  logoutEmoji: { fontSize: 20 },
+  logoutTxt:   { color:'#ef4444', fontWeight:'900', fontSize:14, textTransform: 'uppercase', letterSpacing: 0.5 },
 });
 
 /* ══════════════════════════════════════════════════════════
@@ -255,7 +262,14 @@ function CustomTabBar({ state, descriptors, navigation }) {
         const tab = TABS.find(t => t.name === route.name) || {};
         const onPress = () => {
           const evt = navigation.emit({ type:'tabPress', target:route.key, canPreventDefault:true });
-          if (!isFocused && !evt.defaultPrevented) navigation.navigate(route.name);
+          if (evt.defaultPrevented) return;
+          
+          if (route.name === 'Ferramentas') {
+            // Always go to the root of Tools stack
+            navigation.navigate('Ferramentas', { screen: 'MoreHome' });
+          } else {
+            navigation.navigate(route.name);
+          }
         };
         return (
           <TouchableOpacity

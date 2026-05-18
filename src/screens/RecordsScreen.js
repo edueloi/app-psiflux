@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   RefreshControl, ActivityIndicator, Alert, Modal,
   TextInput, ScrollView, KeyboardAvoidingView, Platform,
-  Dimensions,
+  Dimensions, Switch, Share,
 } from 'react-native';
 import { api } from '../services/api';
 
@@ -13,13 +13,13 @@ const ACCENT = '#6366f1';
 
 /* ── Constantes ──────────────────────────────────────────── */
 const TYPE_META = {
-  Evolucao:      { label:'Evolução Clínica',   emoji:'📋', color:'#6366f1' },
-  Anamnese:      { label:'Anamnese',            emoji:'📝', color:'#10b981' },
-  Avaliacao:     { label:'Avaliação Clínica',   emoji:'🔍', color:'#8b5cf6' },
-  Plano:         { label:'Plano Terapêutico',   emoji:'🗺️', color:'#06b6d4' },
-  Relatorio:     { label:'Relatório / Laudo',   emoji:'📄', color:'#3b82f6' },
-  Encaminhamento:{ label:'Encaminhamento',      emoji:'🔄', color:'#f59e0b' },
-  Atestado:      { label:'Atestado',            emoji:'🏥', color:'#ec4899' },
+  Evolucao:      { label:'Evolução Clínica',   emoji:'📋', color:'#4F46E5', desc: 'Registro da sessão e evolução' },
+  Anamnese:      { label:'Enviar Anamnese',    emoji:'✉️', color:'#7C3AED', desc: 'Enviar formulário remoto ao paciente' },
+  Avaliacao:     { label:'Avaliação Clínica',   emoji:'🔍', color:'#0891B2', desc: 'Escalas e instrumentos aplicados' },
+  Plano:         { label:'Plano Terapêutico',   emoji:'🗺️', color:'#059669', desc: 'Metas e planejamento do caso' },
+  Relatorio:     { label:'Relatório / Laudo',   emoji:'📄', color:'#2563EB', desc: 'Documento técnico ou laudo' },
+  Encaminhamento:{ label:'Encaminhamento',      emoji:'🔄', color:'#D97706', desc: 'Encaminhamento profissional' },
+  Atestado:      { label:'Atestado',            emoji:'🏥', color:'#E11D48', desc: 'Declarações e atestados' },
 };
 const STATUS_META = {
   Rascunho:   { color:'#f59e0b' },
@@ -152,6 +152,8 @@ export default function RecordsScreen() {
   const [showTypeModal, setShowTypeModal] = useState(false);
   const [showFormModal, setShowFormModal] = useState(false);
   const [showViewModal, setShowViewModal] = useState(false);
+  const [showSendAnamnesisModal, setShowSendAnamnesisModal] = useState(false);
+  const [showSourceSelector, setShowSourceSelector] = useState(false);
 
   /* ── Form ─────────────────────────────────────────────── */
   const emptyForm = (type='Evolucao') => ({
@@ -160,6 +162,7 @@ export default function RecordsScreen() {
     draft_content:'', typed_content:{}, restricted_content:'',
     tags:'', session_date:todayStr(), start_time:'', end_time:'',
     appointment_type:'individual',
+    linkedSources: []
   });
   const [form,      setForm]      = useState(emptyForm());
   const [formMode,  setFormMode]  = useState('create'); // 'create'|'edit'
@@ -170,6 +173,21 @@ export default function RecordsScreen() {
   const [patSearch, setPatSearch] = useState('');
   const [saving,    setSaving]    = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
+
+  /* ── Anamnesis Send Flow ──────────────────────────────── */
+  const [anamnesisData, setAnamnesisData] = useState({
+    title: '',
+    welcomeMessage: '',
+    version: 'full',
+    allowResume: true,
+    allowEditAfterSubmit: false,
+    expiresHours: 168, // 7 dias (padrão web)
+    reminderHours: 48,  // 2 dias (padrão web)
+    approach: ''
+  });
+
+  const [sources, setSources] = useState([]);
+  const [sourcesLoading, setSourcesLoading] = useState(false);
 
   /* ── View ─────────────────────────────────────────────── */
   const [viewRecord,         setViewRecord]         = useState(null);
@@ -246,10 +264,93 @@ export default function RecordsScreen() {
 
   /* ── Open new ─────────────────────────────────────────── */
   const openNew = (type) => {
+    if (type === 'Anamnese') {
+      const pat = form.patient_id ? { id: form.patient_id, name: patSearch } : null;
+      setAnamnesisData(prev => ({
+        ...prev,
+        title: pat ? `Anamnese — ${pat.name}` : `Anamnese — ${new Date().toLocaleDateString('pt-BR')}`
+      }));
+      setShowTypeModal(false);
+      setShowSendAnamnesisModal(true);
+      return;
+    }
     setForm(emptyForm(type)); setPatSearch('');
     setFormMode('create'); setFormStep('input'); setEditId(null);
     setOrganized(null); setReviewPts([]);
+    if (type === 'Avaliacao') {
+      fetchSources();
+    }
     setShowTypeModal(false); setShowFormModal(true);
+  };
+
+  const fetchSources = async () => {
+    if (!form.patient_id) return;
+    setSourcesLoading(true);
+    try {
+      const pid = form.patient_id;
+      const [anamnesis, clinical, formResponses] = await Promise.all([
+        api.get(`/anamnesis-send?patient_id=${pid}`).catch(() => []),
+        api.get(`/clinical-tools/patient/${pid}`).catch(() => []),
+        api.get(`/forms/responses?patient_id=${pid}`).catch(() => []),
+      ]);
+
+      const unified = [
+        ...anamnesis.filter(s => s.status === 'answered').map(s => ({
+          id: `anam-${s.id}`, rawId: s.id, name: s.title || 'Anamnese Clínica',
+          category: 'Anamnese', date: s.completed_at || s.created_at, type: 'anamnese'
+        })),
+        ...clinical.map(c => ({
+          id: `tool-${c.id}`, rawId: c.id, name: c.tool_type,
+          category: 'Ferramenta Clínica', date: c.created_at, type: 'clinical'
+        })),
+        ...formResponses.map(fr => ({
+          id: `form-${fr.id}`, rawId: fr.id, name: fr.form_title || 'Formulário',
+          category: fr.form_category || 'Escala', date: fr.created_at, type: 'form'
+        }))
+      ];
+      setSources(unified.sort((a, b) => new Date(b.date) - new Date(a.date)));
+    } catch (error) {
+      console.error('Error fetching sources:', error);
+    } finally {
+      setSourcesLoading(false);
+    }
+  };
+
+  const handleSendAnamnesis = async () => {
+    if (!form.patient_id) { Alert.alert('Atenção','Selecione um paciente primeiro.'); return; }
+    setSaving(true);
+    try {
+      const response = await api.post('/anamnesis-send', {
+        patient_id: form.patient_id,
+        title: anamnesisData.title,
+        custom_message: anamnesisData.welcomeMessage,
+        template_type: anamnesisData.version,
+        allow_resume: anamnesisData.allowResume,
+        allow_edit: anamnesisData.allowEditAfterSubmit,
+        expires_hours: anamnesisData.expiresHours,
+        reminder_hours: anamnesisData.reminderHours,
+        approach: anamnesisData.approach
+      });
+      setShowSendAnamnesisModal(false);
+      Alert.alert(
+        'Sucesso', 
+        'Anamnese gerada com sucesso!',
+        [
+          { 
+            text: 'Compartilhar Link', 
+            onPress: () => Share.share({ 
+              message: `Olá! Por favor, preencha sua anamnese clínica através deste link seguro: ${response.public_link || response.link}` 
+            }) 
+          },
+          { text: 'OK' }
+        ]
+      );
+      load();
+    } catch (error) {
+      Alert.alert('Erro', 'Não foi possível enviar a anamnese.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   /* ── Open edit ────────────────────────────────────────── */
@@ -600,7 +701,10 @@ export default function RecordsScreen() {
                     <View style={[s.typeGridIcon,{backgroundColor:meta.color+'15'}]}>
                       <Text style={{fontSize:24}}>{meta.emoji}</Text>
                     </View>
-                    <Text style={[s.typeGridLabel,{color:meta.color}]}>{meta.label}</Text>
+                    <View style={s.typeGridText}>
+                      <Text style={[s.typeGridLabel,{color:meta.color}]}>{meta.label}</Text>
+                      <Text style={s.typeGridDesc}>{meta.desc}</Text>
+                    </View>
                   </TouchableOpacity>
                 );
               })}
@@ -762,6 +866,25 @@ export default function RecordsScreen() {
                   <Text style={s.backBtnTxt}>← Voltar ao rascunho</Text>
                 </TouchableOpacity>
               </>
+            )}
+
+            {/* ── AVALIAÇÃO: vincular fontes ────────────────── */}
+            {form.record_type==='Avaliacao' && (
+              <View style={s.sourceLinkBox}>
+                <Text style={s.fieldLabel}>FONTES PIN-CLÍNICO</Text>
+                <TouchableOpacity 
+                  style={s.linkSourceBtn}
+                  onPress={() => setShowSourceSelector(true)}
+                >
+                  <Text style={{fontSize:18}}>🔗</Text>
+                  <Text style={s.linkSourceTxt}>
+                    {form.linkedSources.length > 0 
+                      ? `${form.linkedSources.length} Fontes vinculadas` 
+                      : "Vincular testes e anamneses"}
+                  </Text>
+                  <Text style={{fontSize:18, color:ACCENT}}>❯</Text>
+                </TouchableOpacity>
+              </View>
             )}
 
             {/* ── OUTROS TIPOS: campos estruturados ─────── */}
@@ -1090,6 +1213,194 @@ export default function RecordsScreen() {
           </View>
         </View>
       </Modal>
+      {/* ══ Modal: Enviar Anamnese ════════════════════════ */}
+      <Modal visible={showSendAnamnesisModal} animationType="slide" presentationStyle="pageSheet">
+        <View style={s.modalHeader}>
+           <Text style={s.modalTitle}>ENVIAR ANAMNESE</Text>
+           <TouchableOpacity style={s.modalCloseBtn} onPress={()=>setShowSendAnamnesisModal(false)}>
+              <Text style={s.modalCloseTxt}>✕</Text>
+           </TouchableOpacity>
+        </View>
+        <ScrollView style={{padding:20}} keyboardShouldPersistTaps="handled">
+            <Text style={s.fieldLabel}>TÍTULO DO FORMULÁRIO *</Text>
+            <TextInput 
+              style={s.fieldInput} 
+              value={anamnesisData.title}
+              onChangeText={v => setAnamnesisData({...anamnesisData, title: v})}
+              placeholder="Ex: Anamnese Inicial"
+            />
+
+            <Text style={s.fieldLabel}>MENSAGEM DE BOAS-VINDAS (OPCIONAL)</Text>
+            <TextInput 
+              style={[s.fieldInput, {height: 100, textAlignVertical: 'top'}]}
+              value={anamnesisData.welcomeMessage}
+              onChangeText={v => setAnamnesisData({...anamnesisData, welcomeMessage: v})}
+              placeholder="Ex: Olá! Por favor, preencha este formulário..."
+              multiline
+            />
+
+            <Text style={s.fieldLabel}>VERSÃO</Text>
+            <View style={{flexDirection:'row', gap:10, marginBottom:16}}>
+               {[['full','Completa','~15min'],['short','Rápida','~5min']].map(([v,l,t]) => (
+                 <TouchableOpacity 
+                   key={v} 
+                   style={[s.versionCard, anamnesisData.version === v && s.versionCardActive]}
+                   onPress={() => setAnamnesisData({...anamnesisData, version: v})}
+                 >
+                    <Text style={[s.versionLabel, anamnesisData.version === v && {color: ACCENT}]}>{l}</Text>
+                    <Text style={s.versionTime}>{t}</Text>
+                 </TouchableOpacity>
+               ))}
+            </View>
+
+            <Text style={s.fieldLabel}>CONFIGURAÇÕES</Text>
+            {[
+              { label: 'Continuar em etapas', sub: 'Salva o progresso', val: anamnesisData.allowResume, key: 'allowResume' },
+              { label: 'Editar após envio', sub: 'Permite correções', val: anamnesisData.allowEditAfterSubmit, key: 'allowEditAfterSubmit' },
+            ].map(opt => (
+              <TouchableOpacity 
+                key={opt.key}
+                style={[s.optionItem, opt.val && {borderColor: ACCENT, backgroundColor: ACCENT+'05'}]}
+                onPress={() => setAnamnesisData({...anamnesisData, [opt.key]: !opt.val})}
+              >
+                 <View style={{flex:1}}>
+                    <Text style={s.optionTitle}>{opt.label}</Text>
+                    <Text style={s.optionSub}>{opt.sub}</Text>
+                 </View>
+                 <Switch value={opt.val} onValueChange={v => setAnamnesisData({...anamnesisData, [opt.key]: v})} trackColor={{ true: ACCENT }} />
+              </TouchableOpacity>
+            ))}
+
+            <View style={{flexDirection: 'row', gap: 10, marginTop: 10}}>
+              <View style={{flex: 1}}>
+                <Text style={s.fieldLabel}>EXPIRA EM</Text>
+                <TouchableOpacity 
+                   style={s.fieldInput}
+                   onPress={() => {
+                     const opts = [
+                       { label: 'Sem expiração', val: null },
+                       { label: '24 Horas', val: 24 },
+                       { label: '48 Horas', val: 48 },
+                       { label: '7 Dias', val: 168 },
+                       { label: '30 Dias', val: 720 },
+                     ];
+                     Alert.alert('Expiração', 'Selecione em quanto tempo o link expira:', 
+                       opts.map(o => ({ text: o.label, onPress: () => setAnamnesisData({...anamnesisData, expiresHours: o.val}) }))
+                     );
+                   }}
+                >
+                  <Text style={{color: BRAND, fontWeight: '700', fontSize: 14}}>
+                    {anamnesisData.expiresHours ? `${anamnesisData.expiresHours < 168 ? anamnesisData.expiresHours + 'h' : Math.floor(anamnesisData.expiresHours/24) + ' d'}` : 'Sem expiração'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={{flex: 1}}>
+                <Text style={s.fieldLabel}>LEMBRAR EM</Text>
+                <TouchableOpacity 
+                   style={s.fieldInput}
+                   onPress={() => {
+                     const opts = [
+                       { label: 'Sem lembrete', val: null },
+                       { label: '24 Horas', val: 24 },
+                       { label: '48 Horas', val: 48 },
+                       { label: '3 Dias', val: 72 },
+                       { label: '7 Dias', val: 168 },
+                     ];
+                     Alert.alert('Lembrete Automático', 'Se o paciente não responder, enviar um lembrete em:', 
+                       opts.map(o => ({ text: o.label, onPress: () => setAnamnesisData({...anamnesisData, reminderHours: o.val}) }))
+                     );
+                   }}
+                >
+                  <Text style={{color: BRAND, fontWeight: '700', fontSize: 14}}>
+                    {anamnesisData.reminderHours ? `${anamnesisData.reminderHours < 72 ? anamnesisData.reminderHours + 'h' : Math.floor(anamnesisData.reminderHours/24) + ' d'}` : 'Sem lembrete'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <Text style={[s.fieldLabel, {marginTop: 16}]}>ABORDAGEM (PARA GUIA IA)</Text>
+            <TouchableOpacity 
+               style={s.fieldInput}
+               onPress={() => {
+                 const opts = [
+                   { label: 'Não especificar', val: '' },
+                   { label: 'TCC — Terapia Cognitivo-Comportamental', val: 'tcc' },
+                   { label: 'Psicanálise', val: 'psicanalise' },
+                   { label: 'Humanista / Rogersiana', val: 'humanista' },
+                   { label: 'ACT — Terapia de Aceitação e Compromisso', val: 'act' },
+                   { label: 'Sistêmica / Familiar', val: 'sistemica' },
+                   { label: 'Integrativa', val: 'integrativa' },
+                 ];
+                 Alert.alert('Abordagem Clínica', 'A Aurora IA usará esta abordagem para organizar as respostas do paciente:', 
+                   opts.map(o => ({ text: o.label, onPress: () => setAnamnesisData({...anamnesisData, approach: o.val}) }))
+                 );
+               }}
+            >
+              <Text style={{color: BRAND, fontWeight: '700', fontSize: 14}}>
+                {anamnesisData.approach ? anamnesisData.approach.toUpperCase() : 'Não especificar'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={s.fieldHint}>A IA usará esta abordagem para organizar as respostas.</Text>
+
+            <View style={s.infoBox}>
+               <Text style={{fontSize:18}}>💡</Text>
+               <Text style={s.infoText}>
+                 As respostas do paciente não vão direto para o prontuário. Você precisará revisar e aprovar antes.
+               </Text>
+            </View>
+
+            <TouchableOpacity style={s.aiOrgBtn} onPress={handleSendAnamnesis} disabled={saving}>
+               {saving ? <ActivityIndicator color="#fff" /> : <Text style={s.aiOrgBtnTxt}>Gerar e Enviar Link</Text>}
+            </TouchableOpacity>
+            <View style={{height:40}} />
+        </ScrollView>
+      </Modal>
+
+      {/* ══ Modal: Selecionar Fontes ════════════════════════ */}
+      <Modal visible={showSourceSelector} transparent animationType="slide">
+        <View style={s.overlay}>
+           <View style={[s.sheet, {height: '80%'}]}>
+              <View style={s.sheetHandle}/>
+              <Text style={s.sheetTitle}>VINCULAR FONTES</Text>
+              <Text style={s.sheetSub}>Selecione anamneses e testes realizados</Text>
+              
+              {sourcesLoading ? (
+                <ActivityIndicator color={ACCENT} style={{marginTop: 50}} />
+              ) : (
+                <ScrollView style={{flex:1}}>
+                   {sources.length === 0 ? (
+                     <Text style={{textAlign:'center', color:'#94a3b8', marginTop:40}}>Sem fontes disponíveis para este paciente.</Text>
+                   ) : sources.map(item => (
+                     <TouchableOpacity 
+                       key={item.id} 
+                       style={[s.sourceItem, form.linkedSources.includes(item.id) && s.sourceItemActive]}
+                       onPress={() => {
+                         const exists = form.linkedSources.includes(item.id);
+                         setForm(f => ({
+                           ...f, 
+                           linkedSources: exists 
+                             ? f.linkedSources.filter(id => id !== item.id) 
+                             : [...f.linkedSources, item.id]
+                         }));
+                       }}
+                     >
+                        <View style={{flex:1}}>
+                           <Text style={s.sourceCat}>{item.category}</Text>
+                           <Text style={s.sourceName}>{item.name}</Text>
+                           <Text style={s.sourceDate}>{fmtDate(item.date)}</Text>
+                        </View>
+                        {form.linkedSources.includes(item.id) && <Text style={{fontSize:20}}>✅</Text>}
+                     </TouchableOpacity>
+                   ))}
+                </ScrollView>
+              )}
+              <TouchableOpacity style={s.saveBtn} onPress={() => setShowSourceSelector(false)}>
+                 <Text style={s.saveBtnTxt}>Concluir Seleção ({form.linkedSources.length})</Text>
+              </TouchableOpacity>
+           </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -1153,10 +1464,12 @@ const s = StyleSheet.create({
   sheetHandle:   {width:40, height:4, borderRadius:2, backgroundColor:'#e2e8f0', alignSelf:'center', marginBottom:18},
   sheetTitle:    {fontSize:16, fontWeight:'900', color:BRAND, textAlign:'center'},
   sheetSub:      {fontSize:13, color:'#94a3b8', textAlign:'center', marginTop:4, marginBottom:20},
-  typeGrid:      {flexDirection:'row', flexWrap:'wrap', gap:10},
-  typeGridItem:  {width:(SCREEN_W-60)/4, alignItems:'center', gap:6},
-  typeGridIcon:  {width:52, height:52, borderRadius:16, alignItems:'center', justifyContent:'center'},
-  typeGridLabel: {fontSize:10, fontWeight:'800', color:'#475569', textAlign:'center'},
+  typeGrid:      {flexDirection:'column', gap:10, paddingBottom: 20},
+  typeGridItem:  {flexDirection:'row', alignItems:'center', gap:14, padding:12, borderRadius:16, backgroundColor:'#f8fafc', borderWidth:1, borderColor:'#f1f5f9'},
+  typeGridIcon:  {width:56, height:56, borderRadius:16, alignItems:'center', justifyContent:'center'},
+  typeGridText:  {flex:1},
+  typeGridLabel: {fontSize:14, fontWeight:'900', textTransform:'uppercase'},
+  typeGridDesc:  {fontSize:11, color:'#94a3b8', marginTop:2, fontWeight:'500'},
 
   /* Modal */
   modalHeader:   {flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingHorizontal:16, paddingVertical:14, borderBottomWidth:1, borderBottomColor:'#f1f5f9', backgroundColor:'#fff'},
@@ -1260,4 +1573,30 @@ const s = StyleSheet.create({
   gateCancelTxt:{fontSize:13, fontWeight:'600', color:'#64748b'},
   gateConfirm:  {paddingVertical:10, paddingHorizontal:20, borderRadius:10},
   gateConfirmTxt:{fontSize:13, fontWeight:'700', color:'#fff'},
+
+  /* New Modals Extras */
+  versionCard: {flex:1, padding:14, borderRadius:16, backgroundColor:'#f8fafc', borderWidth:1.5, borderColor:'#e2e8f0', alignItems:'center'},
+  versionCardActive: {borderColor:ACCENT, backgroundColor:ACCENT+'05'},
+  versionLabel: {fontSize:13, fontWeight:'800', textTransform:'uppercase', color:'#64748b', textAlign:'center'},
+  versionTime: {fontSize:10, color:'#94a3b8', marginTop:2, fontWeight:'600'},
+  
+  optionItem: {flexDirection:'row', alignItems:'center', padding:14, borderRadius:16, borderWidth:1.5, borderColor:'#e2e8f0', marginBottom:10},
+  optionTitle: {fontSize:14, fontWeight:'700', color:BRAND},
+  optionSub: {fontSize:11, color:'#94a3b8', marginTop:2},
+  
+  infoBox: {flexDirection:'row', gap:12, backgroundColor:'#fffbeb', padding:14, borderRadius:16, borderStyle:'dashed', borderWidth:1, borderColor:'#fde68a', marginVertical:16},
+  infoText: {flex:1, fontSize:12, color:'#92400e', lineHeight:18, fontWeight:'500'},
+
+  sourceLinkBox: {marginBottom:16},
+  linkSourceBtn: {flexDirection:'row', alignItems:'center', gap:12, padding:14, backgroundColor:ACCENT+'08', borderRadius:16, borderWidth:1, borderStyle:'dashed', borderColor:ACCENT},
+  linkSourceTxt: {flex:1, fontSize:14, fontWeight:'700', color:ACCENT},
+
+  sourceItem: {flexDirection:'row', alignItems:'center', padding:16, backgroundColor:'#f8fafc', borderRadius:16, borderWidth:1.5, borderColor:'#e2e8f0', marginBottom:10},
+  sourceItemActive: {borderColor:ACCENT, backgroundColor:ACCENT+'05'},
+  sourceCat: {fontSize:9, fontWeight:'900', color:'#94a3b8', textTransform:'uppercase', marginBottom:2},
+  sourceName: {fontSize:14, fontWeight:'700', color:BRAND},
+  sourceDate: {fontSize:11, color:'#94a3b8', marginTop:2},
+
+  saveBtn: {marginTop:16, backgroundColor:BRAND, paddingVertical:14, borderRadius:16, alignItems:'center'},
+  saveBtnTxt: {color:'#fff', fontSize:14, fontWeight:'900', textTransform:'uppercase'},
 });
